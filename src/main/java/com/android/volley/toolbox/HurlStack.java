@@ -27,14 +27,28 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLStreamHandlerFactory;
+import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
 
-/** A {@link BaseHttpStack} based on {@link HttpURLConnection}. */
+import okhttp3.OkHttpClient;
+
+/** A {@link BaseHttpStack} based on {@link HttpURLConnection}.
+ *   用HttpURLConnection作为联网通讯类。
+ * */
+/*
+* 1.创建 HttpUrlConnection 对象时通过 createConnection (URL url)来实现的
+
+2.添加请求的body会在addBodyIfExists（）内调用request.getBody()来实现
+
+3.添加请求的标头Content-type是调用request.getBodyContentType()来实现的。
+* */
 public class HurlStack extends BaseHttpStack {
 
     private static final int HTTP_CONTINUE = 100;
@@ -84,13 +98,16 @@ public class HurlStack extends BaseHttpStack {
             }
             url = rewritten;
         }
+        //创建一个HttpUrlConnection或者其子类，进行网络连接。
         URL parsedUrl = new URL(url);
         HttpURLConnection connection = openConnection(parsedUrl, request);
         boolean keepConnectionOpen = false;
         try {
+            //添加Http的标头
             for (String headerName : map.keySet()) {
                 connection.setRequestProperty(headerName, map.get(headerName));
             }
+            //根据volley中请求，来设置HttpUrlConnection的连接方式，和传递的内容
             setConnectionParametersForRequest(connection, request);
             // Initialize HttpResponse with data from the HttpURLConnection.
             int responseCode = connection.getResponseCode();
@@ -184,7 +201,9 @@ public class HurlStack extends BaseHttpStack {
         return inputStream;
     }
 
-    /** Create an {@link HttpURLConnection} for the specified {@code url}. */
+    /** Create an {@link HttpURLConnection} for the specified {@code url}.
+     * 通过URL开启一个客户端与url指向资源的间的网络通道。
+     * */
     protected HttpURLConnection createConnection(URL url) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
 
@@ -197,22 +216,53 @@ public class HurlStack extends BaseHttpStack {
     }
 
     /**
+     * 自定义一个SSLContext，而不使用默认的。
+     *
+     * @return
+     */
+    public static OkHttpClient createOkHttpClient(){
+        OkHttpClient okHttpClient=new OkHttpClient();
+        try {
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, null, null);
+//            okHttpClient.setSslSocketFactory( sslContext.getSocketFactory());
+             okHttpClient = new OkHttpClient.Builder()
+                    .sslSocketFactory(sslContext.getSocketFactory())
+                    .build();
+            //避免OkHttp与UrlHttpConnection混合，出现某些方法找不到
+            //参考链接：https://github.com/square/okhttp/issues/673
+            URL.setURLStreamHandlerFactory((URLStreamHandlerFactory) okHttpClient);
+            ;
+        } catch (GeneralSecurityException e) {
+            throw new AssertionError(); // The system has no TLS. Just give up.
+        }
+
+        return  okHttpClient;
+    }
+
+    /**
      * Opens an {@link HttpURLConnection} with parameters.
      *
      * @param url
      * @return an open connection
      * @throws IOException
+     *
+     * 根据url中带有的协议，来开启一个带有参数的HttpURLConnection，或者HttpsURLConnection
      */
     private HttpURLConnection openConnection(URL url, Request<?> request) throws IOException {
         HttpURLConnection connection = createConnection(url);
 
         int timeoutMs = request.getTimeoutMs();
+        //设置连接时间
         connection.setConnectTimeout(timeoutMs);
+        //设置读取时间
         connection.setReadTimeout(timeoutMs);
+        //不设置http缓存
         connection.setUseCaches(false);
         connection.setDoInput(true);
 
         // use caller-provided custom SslSocketFactory, if any, for HTTPS
+        // 若是HTTPS协议，则使用HttpsURLConnection进行连接，且添加自定义的SSLSocketFactory
         if ("https".equals(url.getProtocol()) && mSslSocketFactory != null) {
             ((HttpsURLConnection) connection).setSSLSocketFactory(mSslSocketFactory);
         }
@@ -269,7 +319,13 @@ public class HurlStack extends BaseHttpStack {
                 throw new IllegalStateException("Unknown method type.");
         }
     }
-
+    /**
+     * 若是请求中存在Body(post传递的参数),则写入body到流中。
+     * @param connection
+     * @param request
+     * @throws IOException
+     * @throws AuthFailureError
+     */
     private static void addBodyIfExists(HttpURLConnection connection, Request<?> request)
             throws IOException, AuthFailureError {
         byte[] body = request.getBody();

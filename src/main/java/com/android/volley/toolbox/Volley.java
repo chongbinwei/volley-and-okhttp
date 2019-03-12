@@ -23,11 +23,17 @@ import android.net.http.AndroidHttpClient;
 import android.os.Build;
 import com.android.volley.Network;
 import com.android.volley.RequestQueue;
-import java.io.File;
+import com.android.volley.wcb.OkHttpClientStatck;
 
+import java.io.File;
+/**
+ * 用途：
+ *  初始化Volley中网络配置，异步线程配置，磁盘缓存配置
+ */
 public class Volley {
 
     /** Default on-disk cache directory. */
+    /** Default on-disk cache directory.   默认缓存的文件夹名*/
     private static final String DEFAULT_CACHE_DIR = "volley";
 
     /**
@@ -36,11 +42,16 @@ public class Volley {
      * @param context A {@link Context} to use for creating the cache dir.
      * @param stack A {@link BaseHttpStack} to use for the network, or null for default.
      * @return A started {@link RequestQueue} instance.
+     * * 创建一个默认的工作池对象，且调用RequestQueue的start()
+     *      *  参数Contentxt用于创建磁盘缓存的文件夹
+     *      *  参数HttpStack用于网络工作，默认是nulll
      */
     public static RequestQueue newRequestQueue(Context context, BaseHttpStack stack) {
         BasicNetwork network;
         if (stack == null) {
+            //api版本不小于9，则使用java中HttpURLConnection作为联网方式
             if (Build.VERSION.SDK_INT >= 9) {
+                //创建一个执行网络工作的操作类
                 network = new BasicNetwork(new HurlStack());
             } else {
                 // Prior to Gingerbread, HttpUrlConnection was unreliable.
@@ -64,7 +75,7 @@ public class Volley {
             network = new BasicNetwork(stack);
         }
 
-        return newRequestQueue(context, network);
+        return newRequestQueue(context, new OkHttpClientStatck());
     }
 
     /**
@@ -86,8 +97,11 @@ public class Volley {
     }
 
     private static RequestQueue newRequestQueue(Context context, Network network) {
+        //在手机内存中创建一个缓存数据的文件夹
         File cacheDir = new File(context.getCacheDir(), DEFAULT_CACHE_DIR);
+        //创建一个请求队列，添加磁盘缓存的操作类，执行网络工作的操作类
         RequestQueue queue = new RequestQueue(new DiskBasedCache(cacheDir), network);
+        //开启。
         queue.start();
         return queue;
     }
@@ -97,6 +111,8 @@ public class Volley {
      *
      * @param context A {@link Context} to use for creating the cache dir.
      * @return A started {@link RequestQueue} instance.
+     *     创建一个默认的工作池对象，且调用RequestQueue的start()
+     *     参数Contentxt用于创建磁盘缓存的文件夹
      */
     public static RequestQueue newRequestQueue(Context context) {
         return newRequestQueue(context, (BaseHttpStack) null);
